@@ -1,3 +1,4 @@
+extern crate futures;
 extern crate tokio;
 extern crate tokio_codec;
 
@@ -7,6 +8,7 @@ use bytes::{BufMut, BytesMut};
 use tokio::io::Error;
 use tokio_codec::{Decoder, Encoder};
 
+#[derive(Debug, PartialEq)]
 pub enum ClientEvents {
     IACWillNAWS,
     IACWontNAWS,
@@ -14,6 +16,7 @@ pub enum ClientEvents {
     PassThrough(Vec<u8>),
 }
 
+#[derive(Debug)]
 pub enum ServerEvents {
     IACDoNAWS,
     IACDontNAWS,
@@ -33,10 +36,9 @@ impl Encoder for TermionCodec {
     type Error = Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        match item {
+        match dbg!(item) {
             ServerEvents::IACDontNAWS => {
-                dst.reserve(3);
-                dst.put(&[IAC, DONT, NAWS] as &[u8]);
+                dst.extend_from_slice(&[IAC, DONT, NAWS]);
             }
             ServerEvents::IACDoNAWS => {
                 dst.reserve(3);
@@ -79,28 +81,34 @@ const NAWS: u8 = 31;
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::borrow::Borrow;
+    extern crate tokio_mockstream;
+    use tokio_mockstream::MockStream;
 
-    macro_rules! assert_encode_type {
-        ($event: expr, $expected: expr) => {
-            let mut buf = BytesMut::new();
-            TermionCodec::new()
-                .encode($event, &mut buf)
-                .expect("failed to encode");
-            let actual: &[u8] = buf.borrow();
-            assert_eq!($expected, actual);
-        };
+    macro_rules! assert_encodes_to {
+        ($event: expr, $expected: expr) => {{
+            use futures::{Future, Sink};
+
+            let stream = TermionCodec::new().framed(MockStream::empty());
+            let stream = stream.send($event).wait().unwrap();
+            assert_eq!($expected, stream.into_inner().written());
+        }};
     }
+
+    // macro_rules! assert_decodes_to {
+    //     $(event: expr, bytes: $expr) => {
+
+    //     }
+    // }
 
     #[test]
     fn encode_iac() {
-        assert_encode_type!(ServerEvents::IACDontNAWS, &[IAC, DONT, NAWS]);
-        assert_encode_type!(ServerEvents::IACDoNAWS, &[IAC, DO, NAWS]);
+        assert_encodes_to!(ServerEvents::IACDontNAWS, &[IAC, DONT, NAWS]);
+        assert_encodes_to!(ServerEvents::IACDoNAWS, &[IAC, DO, NAWS]);
     }
 
     #[test]
     fn encode_payload_normal() {
-        assert_encode_type!(
+        assert_encodes_to!(
             ServerEvents::PassThrough(vec![0x10, 0x20, 0x30]),
             &[0x10, 0x20, 0x30]
         );
@@ -108,9 +116,19 @@ mod test {
 
     #[test]
     fn encode_escape() {
-        assert_encode_type!(
+        assert_encodes_to!(
             ServerEvents::PassThrough(vec![0x10, 0xFF, 0x20]),
             &[0x10, 0xFF, 0xFF, 0x20]
         );
+    }
+
+    #[test]
+    fn decode_iac() {
+        use futures::Stream;
+
+        let mut iter = TermionCodec::new()
+            .framed(MockStream::new(&[IAC, WILL, NAWS]))
+            .wait();
+        assert_eq!(ClientEvents::IACWillNAWS, iter.next().unwrap().unwrap())
     }
 }
