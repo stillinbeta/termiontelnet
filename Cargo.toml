@@ -9,6 +9,7 @@ tokio-codec = "0.1.1"
 tokio = "0.1.18"
 futures = "0.1"
 bytes = "0.4.12"
+termion = { path = "../termion" }
 
 [dev-dependencies]
 tokio-mockstream = "1.0"
