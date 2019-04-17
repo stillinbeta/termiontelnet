@@ -3,7 +3,7 @@ extern crate futures;
 extern crate tokio;
 extern crate tokio_codec;
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use tokio::io::Error;
 use tokio_codec::{Decoder, Encoder};
 
