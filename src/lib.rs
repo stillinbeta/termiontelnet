@@ -23,11 +23,12 @@ pub enum ServerEvents {
     PassThrough(Vec<u8>),
 }
 
+#[derive(Default)]
 pub struct TermionCodec(());
 
 impl TermionCodec {
     pub fn new() -> Self {
-        Self(())
+        Default::default()
     }
 }
 
@@ -76,7 +77,7 @@ impl Decoder for TermionCodec {
             return Ok(None);
         }
         if bytes[0] == IAC {
-            match (bytes.get(1).map(|v| *v), bytes.get(2).map(|v| *v)) {
+            match (bytes.get(1).cloned(), bytes.get(2).cloned()) {
                 (Some(IAC), _) => consume_event!(bytes, 2, ClientEvents::Byte(IAC)),
                 (Some(WILL), None) | (Some(WONT), None) | (Some(SB), None) => Ok(None),
                 (Some(WILL), Some(NAWS)) => consume_event!(bytes, 3, ClientEvents::IACWillNAWS),
@@ -84,7 +85,7 @@ impl Decoder for TermionCodec {
                 (Some(SB), Some(NAWS)) if bytes.len() < 9 => Ok(None),
                 (Some(SB), Some(NAWS)) => {
                     let buf = bytes.split_to(9).freeze();
-                    if let &[IAC, SB, NAWS, w0, w1, h0, h1, IAC, SE] = buf.as_ref() {
+                    if let [IAC, SB, NAWS, w0, w1, h0, h1, IAC, SE] = *buf.as_ref() {
                         let h = u16::from_be_bytes([h0, h1]);
                         let w = u16::from_be_bytes([w0, w1]);
                         Ok(Some(ClientEvents::ResizeEvent(h, w)))
