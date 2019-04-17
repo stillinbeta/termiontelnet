@@ -9,22 +9,31 @@ use std::io::{Error, ErrorKind, Read};
 use std::iter::FromIterator;
 use tokio_codec::{Decoder, Encoder};
 
+/// Events received from the telnet client
 #[derive(Debug, PartialEq)]
 pub enum ClientEvents {
+    /// The client has agreed to Negotiate About Window Size
     IACWillNAWS,
+    /// The client has refused to Negiotiate About Window Size
     IACWontNAWS,
-    // Terminal is now .0 wide and .1 high
+    /// Terminal is now .0 wide and .1 high
     ResizeEvent(u16, u16),
+    /// A keypress or mouse event
     TermionEvent(termion::event::Event),
 }
 
+/// Events sent to the telnet client
 #[derive(Debug)]
 pub enum ServerEvents {
+    /// Indicate the server's desire to Negotiate About Window Size
     IACDoNAWS,
+    /// Indicate the server's refusal to Negotiate About Window Size
     IACDontNAWS,
+    /// Pass arbitrary bytes to the client
     PassThrough(Vec<u8>),
 }
 
+/// This codec parses an incoming stream of data as a series of terminal events.
 #[derive(Default)]
 pub struct TelnetCodec(());
 
