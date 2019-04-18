@@ -29,6 +29,10 @@ pub enum ClientEvents {
     Will(TelnetOption),
     /// The client has refused the specified option
     Wont(TelnetOption),
+    /// The client demands a stop to the specific option
+    Dont(TelnetOption),
+    /// The client requests the specific option
+    Do(TelnetOption),
     /// Terminal is now .0 wide and .1 high
     ResizeEvent(u16, u16),
 
@@ -143,14 +147,20 @@ impl Decoder for TelnetCodec {
         // TODO: If an IAC sequence interrupts a terminal escape, this will fail
         if bytes[0] == IAC {
             match (bytes.get(1).cloned(), bytes.get(2).cloned()) {
+                (Some(IAC), _) => unimplemented!("escape code"),
+                // We need more
+                (Some(_), None) => Ok(None),
                 // (Some(IAC), _) => consume_event!(bytes, 2, ClientEvents::Byte(IAC)),
-                (Some(WILL), None) | (Some(WONT), None) | (Some(SB), None) => Ok(None),
                 (Some(WILL), Some(opt)) => {
                     consume_event!(bytes, 3, ClientEvents::Will(get_opt(opt)?))
                 }
                 (Some(WONT), Some(opt)) => {
                     consume_event!(bytes, 3, ClientEvents::Wont(get_opt(opt)?))
                 }
+                (Some(DONT), Some(opt)) => {
+                    consume_event!(bytes, 3, ClientEvents::Dont(get_opt(opt)?))
+                }
+                (Some(DO), Some(opt)) => consume_event!(bytes, 3, ClientEvents::Do(get_opt(opt)?)),
                 (Some(SB), Some(opt)) => match_se(get_opt(opt)?, bytes),
 
                 // let opt = get_opt(opt)?;
@@ -179,7 +189,11 @@ impl Decoder for TelnetCodec {
                 // } else {
                 //     Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
                 // }
-                _ => Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
+                (Some(byte), _) => Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("unknown IAC code {:02}", byte),
+                )),
+                _ => unreachable!(),
             }
         } else {
             // TODO: can we get rid of this?
@@ -254,7 +268,7 @@ fn parse_suboption(opt: TelnetOption, payload: Vec<u8>) -> Result<ClientEvents, 
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::{ClientEvents::*, ServerEvents::*, TelnetOption::*};
+    use super::{ClientEvents, ServerEvents, TelnetOption::*};
     extern crate tokio_mockstream;
     use tokio_mockstream::MockStream;
 
@@ -287,6 +301,8 @@ mod test {
 
     #[test]
     fn encode_iac() {
+        use ServerEvents::*;
+
         assert_encodes_to!(Dont(WindowSize), &[IAC, DONT, 31]);
         assert_encodes_to!(Do(WindowSize), &[IAC, DO, 31]);
 
@@ -294,7 +310,7 @@ mod test {
         assert_encodes_to!(Do(Echo), &[IAC, DO, 1]);
 
         assert_encodes_to!(Dont(LineMode), &[IAC, DONT, 34]);
-        assert_encodes_to!(Do(LineMode), &[IAC, DO, 34]);
+        assert_encodes_to!(ServerEvents::Do(LineMode), &[IAC, DO, 34]);
     }
 
     #[test]
@@ -315,6 +331,8 @@ mod test {
 
     #[test]
     fn decode_iac() {
+        use ClientEvents::*;
+
         assert_decodes_to!(&[IAC, WILL, 31], Will(WindowSize));
         assert_decodes_to!(&[IAC, WONT, 31], Wont(WindowSize));
 
@@ -343,6 +361,8 @@ mod test {
 
     #[test]
     fn decode_many() {
+        use ClientEvents::*;
+
         assert_decodes_to!(
             &[b'\x7f', IAC, WILL, 31, 0, IAC, SB, 31, 0, 80, 0, 40, IAC, SE, b'\x1B', b'[', b'A'],
             TermionEvent(Event::Key(Key::Backspace)),
@@ -355,6 +375,8 @@ mod test {
 
     #[test]
     fn decode_subline() {
+        use ClientEvents::*;
+
         assert_decodes_to!(
             LINEMODE_SUBOPT,
             RawSuboption(
