@@ -64,15 +64,21 @@ pub enum TelnetOption {
     LineMode = 34,
     /// https://tools.ietf.org/html/rfc1408
     EnvironmentVariables = 36,
+    /// https://tools.ietf.org/html/draft-rfced-exp-atmar-00
+    SupressLocalEcho = 41,
 }
 
 /// Events sent to the telnet client
 #[derive(Debug)]
 pub enum ServerEvents {
-    /// Indicate the server's desire to Negotiate About Window Size
+    /// Indicate the server's desire to use the given telnet option
     Do(TelnetOption),
-    /// Indicate the server's refusal to Negotiate About Window Size
+    /// Indicate the server's refusal to use the given telnet option
     Dont(TelnetOption),
+    /// Indicate the server's desire to use the given telnet option
+    Will(TelnetOption),
+    /// Indicate the server's refusal to use the given telnet option
+    Wont(TelnetOption),
     /// Pass arbitrary bytes to the client
     PassThrough(Vec<u8>),
 }
@@ -95,18 +101,23 @@ impl TelnetCodec {
     }
 }
 
+macro_rules! encode {
+    ($dst: expr, $byte: expr, $opt: expr) => {
+        $dst.extend_from_slice(&[IAC, $byte, $opt as u8])
+    };
+}
+
 impl Encoder for TelnetCodec {
     type Item = ServerEvents;
     type Error = Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match dbg!(item) {
-            ServerEvents::Dont(opt) => {
-                dst.extend_from_slice(&[IAC, DONT, opt as u8]);
-            }
-            ServerEvents::Do(opt) => {
-                dst.extend_from_slice(&[IAC, DO, opt as u8]);
-            }
+            ServerEvents::Dont(opt) => encode!(dst, DONT, opt),
+            ServerEvents::Do(opt) => encode!(dst, DO, opt),
+            ServerEvents::Wont(opt) => encode!(dst, WONT, opt),
+            ServerEvents::Will(opt) => encode!(dst, WILL, opt),
+
             ServerEvents::PassThrough(v) => {
                 dst.reserve(v.len());
                 for b in v {
@@ -166,32 +177,6 @@ impl Decoder for TelnetCodec {
                 (Some(DO), Some(opt)) => consume_event!(bytes, 3, ClientEvents::Do(get_opt(opt)?)),
                 (Some(SB), Some(opt)) => match_se(get_opt(opt)?, bytes),
 
-                // let opt = get_opt(opt)?;
-                // let end = match bytes.iter().skip(3).position(|b| *b == IAC) {
-                //     Some(end) => end,
-                //     // We don't have the entire struct
-                //     None => return OK(None),
-                // };
-
-                // match bytes.get(end + 1).map {
-                //     Some(SE) => (),
-                //     // TODO: is this valid?
-                //     Some(b) => {
-                //         return Err(Error::new(
-                //             ErrorKind::InvalidInput,
-                //             format!("expected {:0x}, got {:0x}", SE, b),
-                //         ));
-                //     }
-                //     None => return Ok(None),
-                // }
-
-                // if let [IAw, SB, _opt, w0, w1, h0, h1, IAC, SE] = *buf.as_ref() {
-                //     let h = u16::from_be_bytes([h0, h1]);
-                //     let w = u16::from_be_bytes([w0, w1]);
-                //     Ok(Some(ClientEvents::ResizeEvent(h, w)))
-                // } else {
-                //     Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
-                // }
                 (Some(byte), _) => Err(Error::new(
                     ErrorKind::InvalidData,
                     format!("unknown IAC code {:02}", byte),
