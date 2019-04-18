@@ -9,7 +9,7 @@ tokio-codec = "0.1.1"
 tokio = "0.1.18"
 futures = "0.1"
 bytes = "0.4.12"
-termion = { path = "../termion" }
+termion = { git = "https://github.com/stillinbeta/termion.git", rev = "c13e858d3f4a1eef1317f10c8ed0237c61f38018" }
 num-traits = "0.2"
 num-derive = "0.2"
 
