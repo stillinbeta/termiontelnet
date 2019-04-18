@@ -1,3 +1,4 @@
+#![allow(clippy::useless_attribute)] // https://github.com/rust-num/num-derive/issues/20
 extern crate bytes;
 extern crate futures;
 extern crate termion;
@@ -130,10 +131,12 @@ macro_rules! consume_event {
 }
 
 fn get_opt(opt: u8) -> Result<TelnetOption, Error> {
-    TelnetOption::from_u8(opt).ok_or(Error::new(
-        ErrorKind::InvalidInput,
-        format!("unknown telnet option {}", opt),
-    ))
+    TelnetOption::from_u8(opt).ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("unknown telnet option {}", opt),
+        )
+    })
 }
 
 impl Decoder for TelnetCodec {
@@ -241,14 +244,14 @@ fn match_se(
     // Remainder starts after IAC SE
     let payload = bytes.split_to(index + 2).freeze();
 
-    let event = parse_suboption(opt, payload[3..index].iter().cloned().collect())?;
+    let event = parse_suboption(opt, payload[3..index].to_vec())?;
     Ok(Some(event))
 }
 
 fn parse_suboption(opt: TelnetOption, payload: Vec<u8>) -> Result<ClientEvents, Error> {
     match opt {
-        TelnetOption::WindowSize => match payload.as_slice() {
-            &[w0, w1, h0, h1] => {
+        TelnetOption::WindowSize => match *payload.as_slice() {
+            [w0, w1, h0, h1] => {
                 let h = u16::from_be_bytes([h0, h1]);
                 let w = u16::from_be_bytes([w0, w1]);
                 Ok(ClientEvents::ResizeEvent(h, w))
