@@ -84,6 +84,10 @@ pub enum ServerEvents {
     Wont(TelnetOption),
     /// Pass arbitrary bytes to the client
     PassThrough(Vec<u8>),
+    /// Try to Enable Mouse Support
+    EnableMouse,
+    /// Try to Disable Cursor Support
+    DisableMouse,
 }
 
 /// This codec parses an incoming stream of data as a series of terminal events.
@@ -104,6 +108,9 @@ impl TelnetCodec {
     }
 }
 
+const ENABLE_MOUSE: &[u8] = b"\x1B[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h";
+const DISABLE_MOUSE: &[u8] = b"\x1B[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l";
+
 fn encode(bytes: &mut BytesMut, byte: u8, opt: TelnetOption) {
     bytes.extend_from_slice(&[IAC, byte, opt as u8])
 }
@@ -118,6 +125,8 @@ impl Encoder for TelnetCodec {
             ServerEvents::Do(opt) => encode(dst, DO, opt),
             ServerEvents::Wont(opt) => encode(dst, WONT, opt),
             ServerEvents::Will(opt) => encode(dst, WILL, opt),
+            ServerEvents::EnableMouse => dst.extend_from_slice(ENABLE_MOUSE),
+            ServerEvents::DisableMouse => dst.extend_from_slice(DISABLE_MOUSE),
 
             ServerEvents::PassThrough(v) => {
                 dst.reserve(v.len());
