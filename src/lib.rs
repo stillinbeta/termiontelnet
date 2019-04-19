@@ -104,10 +104,8 @@ impl TelnetCodec {
     }
 }
 
-macro_rules! encode {
-    ($dst: expr, $byte: expr, $opt: expr) => {
-        $dst.extend_from_slice(&[IAC, $byte, $opt as u8])
-    };
+fn encode(bytes: &mut BytesMut, byte: u8, opt: TelnetOption) {
+    bytes.extend_from_slice(&[IAC, byte, opt as u8])
 }
 
 impl Encoder for TelnetCodec {
@@ -115,11 +113,11 @@ impl Encoder for TelnetCodec {
     type Error = Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        match dbg!(item) {
-            ServerEvents::Dont(opt) => encode!(dst, DONT, opt),
-            ServerEvents::Do(opt) => encode!(dst, DO, opt),
-            ServerEvents::Wont(opt) => encode!(dst, WONT, opt),
-            ServerEvents::Will(opt) => encode!(dst, WILL, opt),
+        match item {
+            ServerEvents::Dont(opt) => encode(dst, DONT, opt),
+            ServerEvents::Do(opt) => encode(dst, DO, opt),
+            ServerEvents::Wont(opt) => encode(dst, WONT, opt),
+            ServerEvents::Will(opt) => encode(dst, WILL, opt),
 
             ServerEvents::PassThrough(v) => {
                 dst.reserve(v.len());
@@ -137,11 +135,13 @@ impl Encoder for TelnetCodec {
     }
 }
 
-macro_rules! consume_event {
-    ($bytes: expr, $take: expr, $evt: expr) => {{
-        let _ = $bytes.split_to($take);
-        Ok(Some($evt))
-    }};
+fn consume_event(
+    bytes: &mut BytesMut,
+    take: usize,
+    event: ClientEvents,
+) -> Result<Option<ClientEvents>, Error> {
+    let _ = bytes.split_to(take);
+    Ok(Some(event))
 }
 
 fn get_opt(opt: u8) -> Result<TelnetOption, Error> {
@@ -169,15 +169,15 @@ impl Decoder for TelnetCodec {
                 (Some(_), None) => Ok(None),
                 // (Some(IAC), _) => consume_event!(bytes, 2, ClientEvents::Byte(IAC)),
                 (Some(WILL), Some(opt)) => {
-                    consume_event!(bytes, 3, ClientEvents::Will(get_opt(opt)?))
+                    consume_event(bytes, 3, ClientEvents::Will(get_opt(opt)?))
                 }
                 (Some(WONT), Some(opt)) => {
-                    consume_event!(bytes, 3, ClientEvents::Wont(get_opt(opt)?))
+                    consume_event(bytes, 3, ClientEvents::Wont(get_opt(opt)?))
                 }
                 (Some(DONT), Some(opt)) => {
-                    consume_event!(bytes, 3, ClientEvents::Dont(get_opt(opt)?))
+                    consume_event(bytes, 3, ClientEvents::Dont(get_opt(opt)?))
                 }
-                (Some(DO), Some(opt)) => consume_event!(bytes, 3, ClientEvents::Do(get_opt(opt)?)),
+                (Some(DO), Some(opt)) => consume_event(bytes, 3, ClientEvents::Do(get_opt(opt)?)),
                 (Some(SB), Some(opt)) => match_se(get_opt(opt)?, bytes),
 
                 (Some(byte), _) => Err(Error::new(
@@ -207,6 +207,7 @@ impl Decoder for TelnetCodec {
     }
 }
 
+/// Grab everything until we see an IAC SE sequence
 fn match_se(
     opt: TelnetOption,
     bytes: &mut BytesMut,
@@ -223,7 +224,7 @@ fn match_se(
         Some(byte) => {
             return Err(Error::new(
                 ErrorKind::InvalidData,
-                format!("expected {:0x}, got {:02x}", SE, byte),
+                format!("expected {:02x}, got {:02x}", SE, byte),
             ));
         }
         None => return Ok(None),
@@ -236,6 +237,7 @@ fn match_se(
     Ok(Some(event))
 }
 
+/// If we know this suboption, parse it into an event. Otherwise, return the raw bytes
 fn parse_suboption(opt: TelnetOption, payload: Vec<u8>) -> Result<ClientEvents, Error> {
     match opt {
         TelnetOption::WindowSize => match *payload.as_slice() {
